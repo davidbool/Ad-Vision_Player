@@ -1,0 +1,13 @@
+cat > .gitignore <<'EOF'
+# macOS
+.DS_Store
+
+# Android / Gradle / IDE
+**/build/
+**/.gradle/
+**/.idea/
+
+# Node (אם יש בפרויקט הגדול)
+**/node_modules/
+**/dist/
+EOF

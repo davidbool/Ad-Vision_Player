@@ -1,0 +1,164 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  android-tv-quality:
+    name: Android TV Code Quality
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.modified, 'android-tv-app/') ||
+      contains(github.event.head_commit.added, 'android-tv-app/')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x android-tv-app/gradlew
+      
+      - name: Run detekt (Static Analysis)
+        run: |
+          cd android-tv-app
+          ./gradlew detekt --no-daemon || true
+      
+      - name: Run ktlint (Code Style)
+        run: |
+          cd android-tv-app
+          ./gradlew ktlintCheck --no-daemon || true
+      
+      - name: Run lint
+        run: |
+          cd android-tv-app
+          ./gradlew lintDebug --no-daemon
+      
+      - name: Analyze build with dependencies
+        run: |
+          cd android-tv-app
+          ./gradlew dependencies > dependencies.txt || true
+      
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-tv-quality-reports
+          path: |
+            android-tv-app/app/build/reports/
+            android-tv-app/dependencies.txt
+
+  mobile-app-quality:
+    name: Mobile App Code Quality
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.modified, 'mobile-app/') ||
+      contains(github.event.head_commit.added, 'mobile-app/')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: mobile-app/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd mobile-app
+          npm ci
+      
+      - name: Run ESLint
+        run: |
+          cd mobile-app
+          npm run lint -- --format json --output-file eslint-report.json || true
+          npm run lint
+      
+      - name: Run Prettier check
+        run: |
+          cd mobile-app
+          npx prettier --check "src/**/*.{js,jsx,ts,tsx,json}" || true
+      
+      - name: Run TypeScript check
+        run: |
+          cd mobile-app
+          npm run type-check
+      
+      - name: Analyze bundle size
+        run: |
+          cd mobile-app
+          npx react-native-bundle-visualizer --format json || true
+      
+      - name: Check for security vulnerabilities
+        run: |
+          cd mobile-app
+          npm audit --json > npm-audit.json || true
+          npm audit
+      
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-quality-reports
+          path: |
+            mobile-app/eslint-report.json
+            mobile-app/npm-audit.json
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-3.0, AGPL-3.0
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'

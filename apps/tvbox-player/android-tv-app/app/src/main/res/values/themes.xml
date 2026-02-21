@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme -->
+    <style name="Theme.TVBoxPlayer" parent="Theme.Leanback">
+        <item name="android:colorPrimary">@color/primary</item>
+        <item name="android:colorPrimaryDark">@color/primary_dark</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/background_dark</item>
+    </style>
+
+    <!-- Pairing screen theme -->
+    <style name="Theme.TVBoxPlayer.Pairing" parent="Theme.TVBoxPlayer">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+
+    <!-- Playback screen theme -->
+    <style name="Theme.TVBoxPlayer.Playback" parent="Theme.TVBoxPlayer">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

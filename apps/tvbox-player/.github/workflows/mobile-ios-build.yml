@@ -1,0 +1,226 @@
+name: Mobile iOS Build
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'mobile-app/**'
+      - '.github/workflows/mobile-ios-build.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'mobile-app/**'
+      - '.github/workflows/mobile-ios-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  lint-and-test:
+    name: Lint & Type Check
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: mobile-app/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd mobile-app
+          npm ci
+      
+      - name: Run lint
+        run: |
+          cd mobile-app
+          npm run lint
+      
+      - name: Run type check
+        run: |
+          cd mobile-app
+          npm run type-check
+      
+      - name: Run tests
+        run: |
+          cd mobile-app
+          npm test -- --coverage --watchAll=false
+
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+    needs: [lint-and-test]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: mobile-app/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd mobile-app
+          npm ci
+      
+      - name: Install CocoaPods dependencies
+        run: |
+          cd mobile-app/ios
+          pod install --repo-update
+      
+      - name: Build iOS app (Debug)
+        run: |
+          cd mobile-app/ios
+          xcodebuild -workspace tvboxplayermobile.xcworkspace \
+            -scheme tvboxplayermobile \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            clean build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+      
+      - name: Archive build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: ~/Library/Logs/gym/
+
+  build-ios-release:
+    name: Build iOS Release
+    runs-on: macos-latest
+    needs: [lint-and-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: mobile-app/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd mobile-app
+          npm ci
+      
+      - name: Install CocoaPods dependencies
+        run: |
+          cd mobile-app/ios
+          pod install --repo-update
+      
+      - name: Import signing certificate
+        if: env.CERTIFICATE_BASE64 != ''
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          
+          # Import certificate
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$CERTIFICATE_BASE64" | base64 -d > $CERTIFICATE_PATH
+          security import $CERTIFICATE_PATH -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          
+          rm $CERTIFICATE_PATH
+      
+      - name: Import provisioning profile
+        if: env.PROVISIONING_PROFILE_BASE64 != ''
+        env:
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          echo "$PROVISIONING_PROFILE_BASE64" | base64 -d > $PROFILE_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PROFILE_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+          rm $PROFILE_PATH
+      
+      - name: Build and archive iOS app
+        run: |
+          cd mobile-app/ios
+          if [ ! -z "${{ secrets.IOS_CERTIFICATE_BASE64 }}" ]; then
+            echo "Building signed release"
+            xcodebuild -workspace tvboxplayermobile.xcworkspace \
+              -scheme tvboxplayermobile \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath $RUNNER_TEMP/tvboxplayer.xcarchive \
+              -allowProvisioningUpdates \
+              clean archive
+          else
+            echo "⚠️ No signing certificate found, building unsigned"
+            xcodebuild -workspace tvboxplayermobile.xcworkspace \
+              -scheme tvboxplayermobile \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -allowProvisioningUpdates \
+              clean build \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO
+          fi
+      
+      - name: Export IPA
+        if: env.CERTIFICATE_BASE64 != ''
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        run: |
+          # Create export options plist
+          cat > $RUNNER_TEMP/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>compileBitcode</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/tvboxplayer.xcarchive \
+            -exportPath $RUNNER_TEMP/export \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
+      
+      - name: Upload IPA
+        if: env.CERTIFICATE_BASE64 != ''
+        uses: actions/upload-artifact@v4
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        with:
+          name: ios-release-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+      
+      - name: Clean up keychain
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/app-signing.keychain-db" ]; then
+            security delete-keychain $RUNNER_TEMP/app-signing.keychain-db
+          fi
