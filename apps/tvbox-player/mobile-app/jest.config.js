@@ -2,9 +2,10 @@ module.exports = {
   preset: 'react-native',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|react-native-.*|@react-navigation|react-redux)/)',
+    'node_modules/(?!(react-native|@react-native|react-native-.*|@react-navigation|react-redux|firebase|@firebase)/)',
   ],
   moduleNameMapper: {
+    '^react-native-reanimated$': '<rootDir>/__mocks__/react-native-reanimated.js',
     '^@components/(.*)$': '<rootDir>/src/components/$1',
     '^@screens/(.*)$': '<rootDir>/src/screens/$1',
     '^@navigation/(.*)$': '<rootDir>/src/navigation/$1',

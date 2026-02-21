@@ -1,0 +1,105 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helper functions
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // True when the request comes from the document's owner.
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // True for any authenticated user (including anonymous TV devices).
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // True when the incoming data has all required fields for a pairing request.
+    function validPairingRequest() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['pinHash', 'tvDeviceId', 'deviceName', 'status', 'createdAt', 'expiresAt'])
+        && data.status == 'pending';
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Users collection
+    //   users/{userId}   – user profile document
+    // ─────────────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // ── Devices subcollection ───────────────────────────────────────────────
+      //   users/{userId}/devices/{deviceId}
+      match /devices/{deviceId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // ── Media subcollection ─────────────────────────────────────────────────
+      //   users/{userId}/media/{mediaId}
+      match /media/{mediaId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // ── Playlists subcollection ─────────────────────────────────────────────
+      //   users/{userId}/playlists/{playlistId}
+      match /playlists/{playlistId} {
+        allow read, write: if isOwner(userId);
+
+        // Playlist items nested subcollection
+        match /items/{itemId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+
+      // ── Sync jobs subcollection ─────────────────────────────────────────────
+      //   users/{userId}/syncJobs/{jobId}
+      match /syncJobs/{jobId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // ── Settings subcollection ──────────────────────────────────────────────
+      //   users/{userId}/settings/{deviceId}
+      match /settings/{deviceId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pairing requests
+    //   pairingRequests/{sessionId}
+    //
+    //   TV box (anonymous auth) creates a pending request.
+    //   Mobile user (authenticated) confirms it by writing their userId.
+    //   Both parties may read the document to observe status changes.
+    // ─────────────────────────────────────────────────────────────────────────
+    match /pairingRequests/{sessionId} {
+      // Any authenticated user (including anonymous TV) may create.
+      allow create: if isAuthenticated() && validPairingRequest();
+
+      // Both the TV device that created the request and an authenticated
+      // mobile user may read it.
+      allow read: if isAuthenticated();
+
+      // Only an authenticated (non-anonymous) user may confirm the pairing:
+      // they write their uid into the `userId` field and flip status to
+      // 'confirmed'. The `tvDeviceId` and `pinHash` must not change.
+      allow update: if isAuthenticated()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.status == 'confirmed'
+        && request.resource.data.tvDeviceId == resource.data.tvDeviceId
+        && request.resource.data.pinHash == resource.data.pinHash
+        && request.resource.data.userId == request.auth.uid;
+
+      // Only the TV device that created the request (identified by tvDeviceId
+      // stored in the document) or the user that confirmed it may delete.
+      allow delete: if isAuthenticated()
+        && (
+          request.auth.uid == resource.data.tvDeviceId
+          || request.auth.uid == resource.data.userId
+        );
+    }
+  }
+}
