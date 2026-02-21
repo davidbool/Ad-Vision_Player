@@ -8,5 +8,11 @@ Push images here: adb push &lt;file&gt; "%1$s/"</string>
     <string name="image_directory_error">Unable to access image folder:
 %1$s
 Push images here: adb push &lt;file&gt; "%2$s/"</string>
-    <string name="image_debug_status">source: %1$s • %2$d/%3$d</string>
+    <string name="no_remote_cache">sync: error no cached remote playlist yet</string>
+    <string name="image_debug_status_extended">mode: %1$s
+last checked: %2$s
+last success: %3$s
+source: %4$s
+index: %5$d/%6$d
+%7$s</string>
 </resources>
