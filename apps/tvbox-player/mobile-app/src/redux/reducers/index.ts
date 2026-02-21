@@ -5,8 +5,10 @@ import playlistReducer from './playlistReducer';
 import mediaReducer from './mediaReducer';
 import syncReducer from './syncReducer';
 import settingsReducer from './settingsReducer';
+import authReducer from './authReducer';
 
 const rootReducer = combineReducers({
+  auth: authReducer,
   device: deviceReducer,
   playback: playbackReducer,
   playlist: playlistReducer,

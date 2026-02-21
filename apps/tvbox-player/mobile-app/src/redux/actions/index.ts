@@ -4,4 +4,5 @@ export * from './playlistActions';
 export * from './mediaActions';
 export * from './syncActions';
 export * from './settingsActions';
+export * from './authActions';
 export * from './types';
