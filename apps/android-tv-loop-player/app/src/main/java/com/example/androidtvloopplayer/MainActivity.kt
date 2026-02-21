@@ -69,6 +69,11 @@ class MainActivity : AppCompatActivity() {
         val items: List<RemoteManifestItem>
     )
 
+    private data class RemoteCacheState(
+        val version: Long,
+        val playbackItems: List<PlaybackItem>
+    )
+
     private sealed class SyncResult {
         data class Updated(val version: Long, val playbackItems: List<PlaybackItem>) : SyncResult()
         data class Unchanged(val version: Long) : SyncResult()
@@ -291,7 +296,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadRemoteStateFromCache(): RemoteManifest? {
+    private fun loadRemoteStateFromCache(): RemoteCacheState? {
         val cacheDir = File(getExternalFilesDir(null), REMOTE_CACHE_DIR)
         val stateFile = File(cacheDir, REMOTE_STATE_FILE)
         if (!stateFile.exists()) {
@@ -300,7 +305,36 @@ class MainActivity : AppCompatActivity() {
 
         return try {
             val json = JSONObject(stateFile.readText())
-            parseManifest(json)
+            val version = json.optLong("version", -1L)
+            if (version < 0) {
+                return null
+            }
+
+            val itemsArray = json.optJSONArray("items") ?: JSONArray()
+            val playbackItems = mutableListOf<PlaybackItem>()
+
+            for (index in 0 until itemsArray.length()) {
+                val entry = itemsArray.optJSONObject(index) ?: continue
+                val fileName = entry.optString("file", "").trim()
+                if (fileName.isEmpty()) {
+                    continue
+                }
+
+                val localFile = File(cacheDir, File(fileName).name)
+                if (!localFile.exists() || !localFile.isFile) {
+                    continue
+                }
+
+                val durationMs = if (entry.has("durationMs")) {
+                    entry.optLong("durationMs", DEFAULT_ITEM_DURATION_MS)
+                } else {
+                    DEFAULT_ITEM_DURATION_MS
+                }.coerceIn(MIN_ITEM_DURATION_MS, MAX_ITEM_DURATION_MS)
+
+                playbackItems.add(PlaybackItem(file = localFile, durationMs = durationMs))
+            }
+
+            RemoteCacheState(version = version, playbackItems = playbackItems)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse cached remote state", e)
             null
